@@ -5,7 +5,6 @@
 *.user
 .DS_Store
 
-boost/
 build/
 
 # Windows cruft

@@ -1,6 +1,8 @@
-#include "cinder/app/AppNative.h"
+#include "cinder/app/App.h"
+#include "cinder/app/RendererGL.h"
+#include "cinder/gl/gl.h"
 #include "cinder/Capture.h"
-#include "cinder/gl/Texture.h"
+#include "cinder/Log.h"
 
 #include "CinderOpenCv.h"
 
@@ -8,29 +10,40 @@ using namespace ci;
 using namespace ci::app;
 using namespace std;
 
-class ocvFaceDetectApp : public AppNative {
+class ocvFaceDetectApp : public App {
  public:
-	void setup();
+	void setup() override;
+	void update() override;
+	void draw() override;
 
-	void updateFaces( Surface cameraImage );
-	void update();
-	
-	void draw();
+    void updateFaces( Surface cameraImage );
+    
+private:
+    void printDevices();
 
-	Capture			mCapture;
-	gl::Texture		mCameraTexture;
-	
+
+	CaptureRef			  mCapture;
+	gl::TextureRef		mTexture;
+
 	cv::CascadeClassifier	mFaceCascade, mEyeCascade;
 	vector<Rectf>			mFaces, mEyes;
+
 };
 
 void ocvFaceDetectApp::setup()
 {
-	mFaceCascade.load( getAssetPath( "haarcascade_frontalface_alt.xml" ).string() );
-	mEyeCascade.load( getAssetPath( "haarcascade_eye.xml" ).string() );	
 
-	mCapture = Capture( 640, 480 );
-	mCapture.start();
+	mFaceCascade.load( getAssetPath( "haarcascade_frontalface_alt.xml" ).string() );
+	mEyeCascade.load( getAssetPath( "haarcascade_eye.xml" ).string() );
+
+  printDevices();
+  try {
+    mCapture = Capture::create( 640, 480 );
+  	mCapture->start();
+  } catch ( ci::Exception &exc ) {
+    CI_LOG_EXCEPTION( "Failed to init capture ", exc );
+  }
+
 }
 
 void ocvFaceDetectApp::updateFaces( Surface cameraImage )
@@ -42,10 +55,10 @@ void ocvFaceDetectApp::updateFaces( Surface cameraImage )
 
 	// scale it to half size, as dictated by the calcScale constant
 	int scaledWidth = cameraImage.getWidth() / calcScale;
-	int scaledHeight = cameraImage.getHeight() / calcScale; 
+	int scaledHeight = cameraImage.getHeight() / calcScale;
 	cv::Mat smallImg( scaledHeight, scaledWidth, CV_8UC1 );
 	cv::resize( grayCameraImage, smallImg, smallImg.size(), 0, 0, cv::INTER_LINEAR );
-	
+
 	// equalize the histogram
 	cv::equalizeHist( smallImg, smallImg );
 
@@ -60,7 +73,7 @@ void ocvFaceDetectApp::updateFaces( Surface cameraImage )
 		Rectf faceRect( fromOcv( *faceIter ) );
 		faceRect *= calcScale;
 		mFaces.push_back( faceRect );
-		
+
 		// detect eyes within this face and iterate them, appending them to mEyes
 		vector<cv::Rect> eyes;
 		mEyeCascade.detectMultiScale( smallImg( *faceIter ), eyes );
@@ -74,35 +87,74 @@ void ocvFaceDetectApp::updateFaces( Surface cameraImage )
 
 void ocvFaceDetectApp::update()
 {
-	if( mCapture.checkNewFrame() ) {
-		Surface surface = mCapture.getSurface();
-		mCameraTexture = gl::Texture( surface );
-		updateFaces( surface );
-	}
+
+#if defined( USE_HW_TEXTURE )
+  if ( mCapture && mCapture->checkNewFrame() ) {
+    mTexture = mCapture->getTexture();
+  }
+#else
+  if ( mCapture && mCapture->checkNewFrame() ) {
+    Surface surface = *mCapture->getSurface();
+    if ( ! mTexture ) {
+      // Capture images come back as top-down, and it's more efficient to keep them that way
+      mTexture = gl::Texture::create( surface, gl::Texture::Format().loadTopDown() );
+    }
+    else {
+      mTexture->update( surface );
+    }
+    updateFaces( surface );
+
+  }
+#endif
+	// if( mCapture.checkNewFrame() ) {
+	// 	Surface surface = mCapture.getSurface();
+	// 	mCameraTexture = gl::Texture( surface );
+	// 	updateFaces( surface );
+	// }
 }
 
 void ocvFaceDetectApp::draw()
 {
-	if( ! mCameraTexture )
+
+  gl::clear();
+
+	if( ! mTexture )
 		return;
 
 	gl::setMatricesWindow( getWindowSize() );
 	gl::enableAlphaBlending();
-	
+
 	// draw the webcam image
 	gl::color( Color( 1, 1, 1 ) );
-	gl::draw( mCameraTexture );
-	mCameraTexture.disable();
-	
+	gl::draw( mTexture );
+
 	// draw the faces as transparent yellow rectangles
 	gl::color( ColorA( 1, 1, 0, 0.45f ) );
 	for( vector<Rectf>::const_iterator faceIter = mFaces.begin(); faceIter != mFaces.end(); ++faceIter )
 		gl::drawSolidRect( *faceIter );
-	
+
 	// draw the eyes as transparent blue ellipses
 	gl::color( ColorA( 0, 0, 1, 0.35f ) );
 	for( vector<Rectf>::const_iterator eyeIter = mEyes.begin(); eyeIter != mEyes.end(); ++eyeIter )
 		gl::drawSolidCircle( eyeIter->getCenter(), eyeIter->getWidth() / 2 );
 }
 
-CINDER_APP_NATIVE( ocvFaceDetectApp, RendererGl )
+void ocvFaceDetectApp::printDevices()
+{
+  for( const auto &device : Capture::getDevices() ) {
+		console() << "Device: " << device->getName() << " "
+#if defined( CINDER_COCOA_TOUCH ) || defined( CINDER_ANDROID )
+		<< ( device->isFrontFacing() ? "Front" : "Rear" ) << "-facing"
+#endif
+		<< endl;
+	}
+}
+
+void prepareSettings( ocvFaceDetectApp::Settings* settings )
+{
+#if defined( CINDER_ANDROID )
+  settings->setKeepScreenOn( true );
+#endif
+}
+
+CINDER_APP( ocvFaceDetectApp, RendererGl, prepareSettings )
