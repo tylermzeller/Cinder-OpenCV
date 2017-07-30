@@ -8,7 +8,7 @@ The most current version of cinder that this repo supports is 0.9.1.
 
 Unzip the release into a location you prefer. `cd` into the root folder:
 
-```bash
+```shell
 workspace$ cd cinder_0.9.1_mac
 workspace/cinder_0.9.1_mac$ ls
 CMakeLists.txt	README.md	include		samples
@@ -18,7 +18,7 @@ docs		proj		tools
 
 Clone this repo into your cinder root directory:
 
-```bash
+```shell
 workspace/cinder_0.9.1_mac$ git clone https://github.com/tylermzeller/Cinder-OpenCV.git
 workspace/cinder_0.9.1_mac$ ls
 CMakeLists.txt	README.md	include		samples
